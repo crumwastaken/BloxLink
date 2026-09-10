@@ -33,7 +33,8 @@ const CONFIG = {
     WEBHOOKS: {
         MAIN: process.env.DISCORD_MAIN_WEBHOOK,
         UNWANTED: process.env.DISCORD_UNWANTED_WEBHOOK,
-        LOGS: process.env.DISCORD_LOG_WEBHOOK
+        LOGS: process.env.DISCORD_LOG_WEBHOOK,
+        ALL_ACCOUNTS: process.env.DISCORD_ALL_ACCOUNTS_WEBHOOK
     },
 
     BLOXGEN_LOGO_URL: "https://raw.githubusercontent.com/crumwastaken/BloxLink/1dd60098c6961d6d5ba00bcfb6a4e325a81628b8/Logo.png",
@@ -148,6 +149,10 @@ function validateConfig() {
 
     if (!CONFIG.WEBHOOKS.LOGS) {
         missing.push("DISCORD_LOG_WEBHOOK");
+    }
+
+    if (!CONFIG.WEBHOOKS.ALL_ACCOUNTS) {
+        missing.push("DISCORD_ALL_ACCOUNTS_WEBHOOK");
     }
 
     if (missing.length > 0) {
@@ -914,19 +919,37 @@ function createAccountEmbed(
    RAW ACCOUNT MESSAGE
 ========================================================= */
 
-function createRawAccountMessage(
-    account
-) {
+function createDetailedAccountMessage(account) {
 
-    return [
-        "```json",
-        JSON.stringify(
-            account,
-            null,
-            2
-        ),
-        "```"
-    ].join("\n");
+   const lines = [];
+
+    for (
+        const [key, value]
+        of Object.entries(account)
+    ) {
+
+        let displayValue;
+
+        if (
+            value !== null &&
+            typeof value === "object"
+        ) {
+
+            displayValue =
+                JSON.stringify(value);
+
+        } else {
+
+            displayValue =
+                String(value);
+        }
+
+        lines.push(
+            `- **${key}:** ${displayValue}`
+        );
+    }
+
+    return lines.join("\n");
 }
 
 
@@ -952,39 +975,27 @@ async function postAccount(
 
 
     /*
-     * Raw API response.
+     * =====================================================
+     * MAIN / UNWANTED WEBHOOK
+     * =====================================================
+     *
+     * ONLY username:password in the message content.
+     *
+     * The embed remains unchanged.
      */
-    const rawData =
-        JSON.stringify(
-            account,
-            null,
-            2
-        );
 
+    const username =
+        isUsableValue(account.username)
+            ? String(account.username)
+            : "";
 
-    /*
-     * Discord has a 2000 character message-content
-     * limit. If the raw JSON is larger, send it as
-     * a code block when possible, otherwise truncate
-     * it rather than failing the entire generation.
-     */
-    let content =
-        createRawAccountMessage(
-            account
-        );
+    const password =
+        isUsableValue(account.password)
+            ? String(account.password)
+            : "";
 
-    if (content.length > 2000) {
-
-        content =
-            [
-                "```json",
-                rawData.slice(
-                    0,
-                    1950
-                ),
-                "```"
-            ].join("\n");
-    }
+    const compactContent =
+        `${username}:${password}`;
 
 
     const embed =
@@ -1001,13 +1012,169 @@ async function postAccount(
             username:
                 CONFIG.BOT_NAME,
 
-            content,
+            content:
+                compactContent,
 
             embeds: [
                 embed
             ]
         }
     );
+
+
+    /*
+     * =====================================================
+     * ALL ACCOUNTS WEBHOOK
+     * =====================================================
+     *
+     * Every successfully generated account gets sent here,
+     * regardless of age or destination.
+     *
+     * This contains all API response fields in searchable
+     * plain text rather than a JSON code block.
+     */
+
+    const detailedContent =
+        createDetailedAccountMessage(
+            account
+        );
+
+
+    /*
+     * Discord messages have a content size limit.
+     *
+     * Split the detailed account data into multiple
+     * messages if necessary.
+     */
+
+    const MAX_CONTENT_LENGTH = 1900;
+
+    const lines =
+        detailedContent.split("\n");
+
+    const chunks = [];
+
+    let currentChunk = "";
+
+
+    for (
+        const line of lines
+    ) {
+
+        /*
+         * Normal case: line fits in current chunk.
+         */
+        if (
+            currentChunk.length +
+            line.length +
+            1
+            <= MAX_CONTENT_LENGTH
+        ) {
+
+            currentChunk +=
+                currentChunk
+                    ? `\n${line}`
+                    : line;
+
+            continue;
+        }
+
+
+        /*
+         * Save the current chunk.
+         */
+        if (currentChunk) {
+
+            chunks.push(
+                currentChunk
+            );
+
+            currentChunk = "";
+        }
+
+
+        /*
+         * If an individual field itself is too large
+         * (for example a very long cookie), split it.
+         */
+        if (
+            line.length >
+            MAX_CONTENT_LENGTH
+        ) {
+
+            let remaining =
+                line;
+
+            while (
+                remaining.length >
+                MAX_CONTENT_LENGTH
+            ) {
+
+                chunks.push(
+                    remaining.slice(
+                        0,
+                        MAX_CONTENT_LENGTH
+                    )
+                );
+
+                remaining =
+                    remaining.slice(
+                        MAX_CONTENT_LENGTH
+                    );
+            }
+
+            currentChunk =
+                remaining;
+
+        } else {
+
+            currentChunk =
+                line;
+        }
+    }
+
+
+    if (currentChunk) {
+
+        chunks.push(
+            currentChunk
+        );
+    }
+
+
+    /*
+     * Send every chunk to the archive webhook.
+     *
+     * The embed is attached only to the final message
+     * so the archive channel doesn't get duplicate embeds.
+     */
+
+    for (
+        let i = 0;
+        i < chunks.length;
+        i++
+    ) {
+
+        const isLast =
+            i === chunks.length - 1;
+
+        await sendWebhook(
+            CONFIG.WEBHOOKS.ALL_ACCOUNTS,
+
+            {
+                username:
+                    CONFIG.BOT_NAME,
+
+                content:
+                    chunks[i],
+
+                embeds:
+                    isLast
+                        ? [embed]
+                        : []
+            }
+        );
+    }
 
 
     return destination;
