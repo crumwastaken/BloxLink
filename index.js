@@ -4,6 +4,9 @@ const fs = require("fs");
 const https = require("https");
 
 /*
+
+Vibe coded by crumwastaken enjoy if your gonna use this
+
 ===========================================================
  BloxGen Generator
 ===========================================================
