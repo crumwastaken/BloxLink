@@ -1,11 +1,16 @@
 {
   "name": "bloxgen-generator",
   "version": "1.0.0",
+  "description": "BloxGen automated generation service",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "dotenv": "^16.4.7"
-  }
+  },
+  "private": true
 }
