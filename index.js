@@ -36,11 +36,7 @@ const CONFIG = {
         LOGS: process.env.DISCORD_LOG_WEBHOOK
     },
 
-    /*
-     * Put the BloxGen logo URL here.
-     * This is NOT a secret.
-     */
-    BLOXGEN_LOGO_URL: "",
+    BLOXGEN_LOGO_URL: "https://raw.githubusercontent.com/crumwastaken/BloxLink/1dd60098c6961d6d5ba00bcfb6a4e325a81628b8/Logo.png",
 
     BOT_NAME: "BloxGen Generator",
 
