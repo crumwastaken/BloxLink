@@ -49,7 +49,7 @@ const CONFIG = {
     GENERATORS: {
 
         alt: {
-            enabled: false,
+            enabled: true,
             dailyLimit: 50,
             cooldownMs: 30 * 1000
         },
@@ -61,7 +61,7 @@ const CONFIG = {
         },
 
         "1year": {
-            enabled: false,
+            enabled: true,
             dailyLimit: 7,
             cooldownMs: 25 * 60 * 1000
         },
