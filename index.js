@@ -3,7 +3,7 @@ const https = require("https");
 
 const CONFIG = {
     API_BASE: "https://core.bloxgen.net",
-    PLATFORM_API_BASE: "https://MyPlatform.com/v1/users",
+    PLATFORM_API_BASE: "https://users.roblox.com/v1/users",
     API_KEY: process.env.BLOXGEN_API_KEY,
 
     WEBHOOKS: {
