@@ -27,7 +27,7 @@ Vibe coded by crumwastaken enjoy if your gonna use this
 const CONFIG = {
 
     API_BASE: "https://core.bloxgen.net",
-    PLATFORM_API_BASE: "https://roblox.com/v1/users",
+    PLATFORM_API_BASE: "https://users.roblox.com/v1/users",
 
     API_KEY: process.env.BLOXGEN_API_KEY,
 
@@ -505,6 +505,73 @@ function requestJson(
 }
 
 
+function debugSafe(value) {
+    const sensitiveKeys = [
+        "apikey",
+        "api_key",
+        "password",
+        "cookie",
+        "cookies",
+        "token",
+        "authorization",
+        "webhook",
+        "webhookurl",
+        "webhook_url"
+    ];
+
+    function clean(item) {
+        if (Array.isArray(item)) {
+            return item.map(clean);
+        }
+
+        if (item && typeof item === "object") {
+            const output = {};
+
+            for (const [key, value] of Object.entries(item)) {
+                if (sensitiveKeys.includes(key.toLowerCase())) {
+                    output[key] = "[REDACTED]";
+                } else {
+                    output[key] = clean(value);
+                }
+            }
+
+            return output;
+        }
+
+        return item;
+    }
+
+    return clean(value);
+}
+
+function debugLog(label, value) {
+    console.log(`\\n[DEBUG] ${label}`);
+
+    if (value === undefined) {
+        console.log("undefined");
+        return;
+    }
+
+    if (typeof value === "string") {
+        console.log(value);
+        return;
+    }
+
+    try {
+        console.log(
+            JSON.stringify(
+                debugSafe(value),
+                null,
+                2
+            )
+        );
+    } catch (error) {
+        console.log("[DEBUG] Could not stringify value:", error.message);
+        console.log(value);
+    }
+}
+
+
 /* =========================================================
    BLOXGEN API
 ========================================================= */
@@ -523,29 +590,52 @@ async function generateAccount(type) {
             CONFIG.API_BASE
         );
 
-    return requestJson(
-        {
-            hostname: url.hostname,
+    console.log("\\n================ BloxGen API Request ================");
+    console.log("[DEBUG] Generator type:", type);
+    console.log("[DEBUG] BloxGen API type:", apiType(type));
+    console.log("[DEBUG] Request URL:", url.toString());
+    console.log("[DEBUG] HTTP method: POST");
+    console.log("[DEBUG] Request body:", JSON.stringify({
+        apiKey: "[REDACTED]",
+        type: apiType(type)
+    }));
+    console.log("=======================================================\\n");
 
-            port: 443,
+    const startedAt = Date.now();
 
-            path:
-                url.pathname +
-                url.search,
+    const response =
+        await requestJson(
+            {
+                hostname: url.hostname,
 
-            method: "POST",
+                port: 443,
 
-            headers: {
-                "Content-Type":
-                    "application/json",
+                path:
+                    url.pathname +
+                    url.search,
 
-                "Content-Length":
-                    Buffer.byteLength(body)
-            }
-        },
+                method: "POST",
 
-        body
-    );
+                headers: {
+                    "Content-Type":
+                        "application/json",
+
+                    "Content-Length":
+                        Buffer.byteLength(body)
+                }
+            },
+
+            body
+        );
+
+    console.log("\\n================ BloxGen API Response ================");
+    console.log("[DEBUG] Response time:", `${Date.now() - startedAt}ms`);
+    console.log("[DEBUG] HTTP status:", response.statusCode);
+    console.log("[DEBUG] Response headers:", debugSafe(response.headers));
+    debugLog("BloxGen response data (sensitive values redacted)", response.data);
+    console.log("========================================================\\n");
+
+    return response;
 }
 
 
@@ -554,6 +644,14 @@ async function getPlatformUser(id) {
         new URL(
             `${CONFIG.PLATFORM_API_BASE}/${encodeURIComponent(id)}`
         );
+
+    console.log("\n================ Platform API Request ================");
+    console.log("[DEBUG] User ID:", id);
+    console.log("[DEBUG] Request URL:", url.toString());
+    console.log("[DEBUG] HTTP method: GET");
+    console.log("========================================================\n");
+
+    const startedAt = Date.now();
 
     const response =
         await requestJson({
@@ -564,6 +662,13 @@ async function getPlatformUser(id) {
                 url.search,
             method: "GET"
         });
+
+    console.log("\n================ Platform API Response ================");
+    console.log("[DEBUG] Response time:", `${Date.now() - startedAt}ms`);
+    console.log("[DEBUG] HTTP status:", response.statusCode);
+    console.log("[DEBUG] Response headers:", debugSafe(response.headers));
+    debugLog("Platform API response", response.data);
+    console.log("========================================================\n");
 
     if (
         response.statusCode < 200 ||
@@ -987,15 +1092,24 @@ async function postAccount(
     account,
     requestedType
 ) {
+    console.log("\n================ Account Processing ================");
+    console.log("[DEBUG] Requested generator type:", requestedType);
+    console.log("[DEBUG] Account ID:", account && account.id);
+    console.log("[DEBUG] Account username:", account && account.username);
+
     const platformUser =
         await getPlatformUser(
             account.id
         );
 
+    debugLog("Platform user used for routing", platformUser);
+
     const destination =
         routeAccount(
             platformUser
         );
+
+    console.log("[DEBUG] Final account destination:", destination);
 
     const webhook =
         destination === "MAIN"
@@ -1022,6 +1136,8 @@ async function postAccount(
             requestedType
         );
 
+    console.log("[DEBUG] Sending account to destination webhook:", destination);
+
     await sendWebhook(
         webhook,
         {
@@ -1039,6 +1155,8 @@ async function postAccount(
         createDetailedAccountMessage(
             account
         );
+
+    console.log("[DEBUG] Sending account to ALL_ACCOUNTS webhook.");
 
     await sendWebhook(
         CONFIG.WEBHOOKS.ALL_ACCOUNTS,
@@ -1173,6 +1291,9 @@ function classifyResponse(
         JSON.stringify(data)
             .toLowerCase();
 
+    console.log("\n================ BloxGen Response Classification ================");
+    console.log("[DEBUG] HTTP status:", status);
+    debugLog("[DEBUG] Response being classified", data);
 
     /*
      * HTTP rate limit.
@@ -1180,6 +1301,8 @@ function classifyResponse(
     if (
         status === 429
     ) {
+        console.log("[DEBUG] Classification result: RATE_LIMIT");
+        console.log("================================================================\n");
         return "RATE_LIMIT";
     }
 
@@ -1216,6 +1339,8 @@ function classifyResponse(
         )
     ) {
 
+        console.log("[DEBUG] Classification result: NO_STOCK");
+        console.log("================================================================\n");
         return "NO_STOCK";
     }
 
@@ -1230,6 +1355,8 @@ function classifyResponse(
         data.data
     ) {
 
+        console.log("[DEBUG] Classification result: SUCCESS");
+        console.log("================================================================\n");
         return "SUCCESS";
     }
 
@@ -1241,6 +1368,8 @@ function classifyResponse(
         data.success === false
     ) {
 
+        console.log("[DEBUG] Classification result: API_ERROR");
+        console.log("================================================================\n");
         return "API_ERROR";
     }
 
@@ -1252,6 +1381,8 @@ function classifyResponse(
         status >= 400
     ) {
 
+        console.log("[DEBUG] Classification result: HTTP_ERROR");
+        console.log("================================================================\n");
         return "HTTP_ERROR";
     }
 
@@ -1259,6 +1390,8 @@ function classifyResponse(
     /*
      * Unexpected response.
      */
+    console.log("[DEBUG] Classification result: INVALID_RESPONSE");
+    console.log("================================================================\n");
     return "INVALID_RESPONSE";
 }
 
@@ -1388,6 +1521,8 @@ async function processGenerator(
             classifyResponse(
                 response
             );
+
+        console.log("[DEBUG] processGenerator classification:", result);
 
 
         /* ---------------------------------------------
@@ -1733,3 +1868,244 @@ async function stopGenerator(
     ) {
         return;
     }
+
+
+    STATE.stopping = true;
+
+    STATE.running = false;
+
+
+    if (
+        STATE.scheduler
+    ) {
+
+        clearInterval(
+            STATE.scheduler
+        );
+
+        STATE.scheduler = null;
+    }
+
+
+    await operationalLog(
+        "WARNING",
+        reason
+    );
+}
+
+
+/* =========================================================
+   DURATION FORMAT
+========================================================= */
+
+function formatDuration(ms) {
+
+    let seconds =
+        Math.ceil(ms / 1000);
+
+    const days =
+        Math.floor(
+            seconds / 86400
+        );
+
+    seconds %= 86400;
+
+    const hours =
+        Math.floor(
+            seconds / 3600
+        );
+
+    seconds %= 3600;
+
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+    seconds %= 60;
+
+
+    const parts = [];
+
+    if (days) {
+        parts.push(`${days}d`);
+    }
+
+    if (hours) {
+        parts.push(`${hours}h`);
+    }
+
+    if (minutes) {
+        parts.push(`${minutes}m`);
+    }
+
+    if (seconds) {
+        parts.push(`${seconds}s`);
+    }
+
+
+    return parts.length
+        ? parts.join(" ")
+        : "0s";
+}
+
+
+/* =========================================================
+   STATUS DISPLAY
+========================================================= */
+
+function printStatus() {
+
+    console.log("");
+    console.log(
+        "=============================="
+    );
+    console.log(
+        " BloxGen Generator Status"
+    );
+    console.log(
+        "=============================="
+    );
+
+
+    for (
+        const [type, config]
+        of Object.entries(
+            CONFIG.GENERATORS
+        )
+    ) {
+
+        if (!config.enabled) {
+            continue;
+        }
+
+
+        const count =
+            getCount(type);
+
+
+        const remaining =
+            getRemaining(type);
+
+
+        const last =
+            STATE.lastGeneration[type];
+
+
+        let cooldown =
+            "Ready";
+
+
+        if (last) {
+
+            const remainingMs =
+                Math.max(
+                    0,
+
+                    config.cooldownMs -
+                    (
+                        Date.now() -
+                        last
+                    )
+                );
+
+
+            if (
+                remainingMs > 0
+            ) {
+
+                cooldown =
+                    formatDuration(
+                        remainingMs
+                    );
+            }
+        }
+
+
+        console.log(
+            `${displayType(type)}: ${count}/${config.dailyLimit} | Cooldown: ${cooldown} | Remaining: ${remaining}`
+        );
+    }
+
+
+    console.log(
+        "=============================="
+    );
+
+    console.log("");
+}
+
+
+/* =========================================================
+   PROCESS SIGNALS
+========================================================= */
+
+process.on(
+    "SIGINT",
+
+    async () => {
+
+        await stopGenerator(
+            "Generator stopped manually."
+        );
+
+        process.exit(0);
+    }
+);
+
+
+process.on(
+    "SIGTERM",
+
+    async () => {
+
+        await stopGenerator(
+            "Generator terminated."
+        );
+
+        process.exit(0);
+    }
+);
+
+
+/* =========================================================
+   STARTUP
+========================================================= */
+
+async function main() {
+
+    validateConfig();
+
+    loadState();
+
+    resetDailyCountersIfNeeded();
+
+    printStatus();
+
+    await startGenerator();
+}
+
+
+main()
+    .catch(
+        async error => {
+
+            console.error(
+                "Fatal error:",
+                error
+            );
+
+            await operationalLog(
+                "ERROR",
+
+                "Fatal generator error.",
+
+                {
+                    Error:
+                        error.message
+                }
+            );
+
+            process.exit(1);
+        }
+    );
