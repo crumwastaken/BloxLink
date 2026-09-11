@@ -27,6 +27,7 @@ Vibe coded by crumwastaken enjoy if your gonna use this
 const CONFIG = {
 
     API_BASE: "https://core.bloxgen.net",
+    PLATFORM_API_BASE: "https://roblox.com/v1/users",
 
     API_KEY: process.env.BLOXGEN_API_KEY,
 
@@ -548,6 +549,45 @@ async function generateAccount(type) {
 }
 
 
+async function getPlatformUser(id) {
+    const url =
+        new URL(
+            `${CONFIG.PLATFORM_API_BASE}/${encodeURIComponent(id)}`
+        );
+
+    const response =
+        await requestJson({
+            hostname: url.hostname,
+            port: 443,
+            path:
+                url.pathname +
+                url.search,
+            method: "GET"
+        });
+
+    if (
+        response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        !response.data ||
+        !response.data.created
+    ) {
+        throw new Error(
+            `Platform API returned HTTP ${response.statusCode}`
+        );
+    }
+
+    const created =
+        new Date(response.data.created);
+
+    if (Number.isNaN(created.getTime())) {
+        throw new Error(
+            "Platform API returned an invalid created date"
+        );
+    }
+
+    return response.data;
+}
+
 /* =========================================================
    DISCORD
 ========================================================= */
@@ -654,7 +694,7 @@ async function operationalLog(
     const embed = {
 
         title:
-            `${CONFIG.BOT_NAME} • ${level}`,
+            `${CONFIG.BOT_NAME} â¢ ${level}`,
 
         description:
             String(message)
@@ -668,7 +708,7 @@ async function operationalLog(
 
         footer: {
             text:
-                "Operational Log • BloxGen Generator"
+                "Operational Log â¢ BloxGen Generator"
         },
 
         timestamp
@@ -703,57 +743,18 @@ async function operationalLog(
 ========================================================= */
 
 function routeAccount(
-    account,
-    requestedType
+    platformUser
 ) {
+    const created =
+        new Date(platformUser.created);
 
-    /*
-     * BloxGen's documented response includes
-     * estimated_age.
-     */
+    const ageMs =
+        Date.now() - created.getTime();
 
-    const age =
-        Number(account.estimated_age);
-
-    /*
-     * If an actual numeric age is available,
-     * use it as the source of truth.
-     */
-    if (
-        Number.isFinite(age)
-    ) {
-
-        if (age >= 30) {
-            return "MAIN";
-        }
-
-        return "UNWANTED";
-    }
-
-    /*
-     * If the age is unavailable, don't guess that
-     * an ALT is old enough.
-     *
-     * For explicitly aged generators, the requested
-     * type itself provides a reasonable fallback.
-     */
-    if (
-        requestedType === "30day" ||
-        requestedType === "1year" ||
-        requestedType === "5year"
-    ) {
-
-        return "MAIN";
-    }
-
-    /*
-     * An unverified ALT with no usable age information
-     * goes to the unwanted channel rather than being
-     * incorrectly classified as 30+ days.
-     */
-    return "UNWANTED";
+    return ageMs > 30 * 24 * 60 * 60 * 1000
+        ? "MAIN"
+        : "UNWANTED";
 }
-
 
 /* =========================================================
    ACCOUNT EMBED
@@ -761,9 +762,9 @@ function routeAccount(
 
 function createAccountEmbed(
     account,
+    platformUser,
     requestedType
 ) {
-
     const fields = [];
 
     function addField(
@@ -771,7 +772,6 @@ function createAccountEmbed(
         value,
         inline = true
     ) {
-
         if (
             !isUsableValue(value)
         ) {
@@ -787,10 +787,14 @@ function createAccountEmbed(
         });
     }
 
-
     addField(
         "Username",
         account.username
+    );
+
+    addField(
+        "Display Name",
+        platformUser.displayName
     );
 
     addField(
@@ -844,6 +848,57 @@ function createAccountEmbed(
         account.estimated_age_group
     );
 
+    const created =
+        new Date(platformUser.created);
+
+    const unix =
+        Math.floor(
+            created.getTime() / 1000
+        );
+
+    const ageMs =
+        Math.max(
+            0,
+            Date.now() - created.getTime()
+        );
+
+    const days =
+        Math.floor(
+            ageMs / (24 * 60 * 60 * 1000)
+        );
+
+    const years =
+        Math.floor(days / 365);
+
+    const months =
+        Math.floor(days / 30);
+
+    let ageText;
+
+    if (years >= 1) {
+        ageText =
+            `${years} ${years === 1 ? "year" : "years"} ago`;
+    } else if (months >= 1) {
+        ageText =
+            `${months} ${months === 1 ? "month" : "months"} ago`;
+    } else {
+        ageText =
+            `${days} ${days === 1 ? "day" : "days"} ago`;
+    }
+
+    addField(
+        "Account Age",
+        `<t:${unix}:R>\n(${ageText})`,
+        false
+    );
+
+    addField(
+        "Status",
+        platformUser.isBanned
+            ? "BANNED â"
+            : "Not Banned"
+    );
+
     addField(
         "Cost",
         isUsableValue(account.cost)
@@ -851,33 +906,22 @@ function createAccountEmbed(
             : null
     );
 
-
     const embed = {
-
         title:
             "BloxGen Generator",
-
         description:
             "Account generated successfully.",
-
         color:
             CONFIG.EMBED_COLOR,
-
         fields,
-
         footer: {
             text:
-                "BloxGen • Automated Generation System"
+                "BloxGen â¢ Automated Generation System"
         },
-
         timestamp:
             new Date().toISOString()
     };
 
-
-    /*
-     * Avatar headshot.
-     */
     const avatar =
         account.fullAvatarUrl ||
         account.avatarUrl;
@@ -885,27 +929,19 @@ function createAccountEmbed(
     if (
         isUsableValue(avatar)
     ) {
-
         embed.thumbnail = {
             url: avatar
         };
     }
 
-
-    /*
-     * BloxGen logo.
-     */
     if (
         isUsableValue(
             CONFIG.BLOXGEN_LOGO_URL
         )
     ) {
-
         embed.author = {
-
             name:
                 CONFIG.BOT_NAME,
-
             icon_url:
                 CONFIG.BLOXGEN_LOGO_URL
         };
@@ -914,44 +950,34 @@ function createAccountEmbed(
     return embed;
 }
 
-
 /* =========================================================
    RAW ACCOUNT MESSAGE
 ========================================================= */
 
-function createDetailedAccountMessage(account) {
+function createDetailedAccountMessage(
+    account
+) {
+    const username =
+        isUsableValue(account.username)
+            ? String(account.username)
+            : "";
 
-   const lines = [];
+    const password =
+        isUsableValue(account.password)
+            ? String(account.password)
+            : "";
 
-    for (
-        const [key, value]
-        of Object.entries(account)
-    ) {
+    const cookie =
+        isUsableValue(account.cookie)
+            ? String(account.cookie)
+            : "";
 
-        let displayValue;
-
-        if (
-            value !== null &&
-            typeof value === "object"
-        ) {
-
-            displayValue =
-                JSON.stringify(value);
-
-        } else {
-
-            displayValue =
-                String(value);
-        }
-
-        lines.push(
-            `- **${key}:** ${displayValue}`
-        );
-    }
-
-    return lines.join("\n");
+    return [
+        `- **Username:** ${username}`,
+        `- **Password:** ${password}`,
+        `- **Cookie:** ${cookie}`
+    ].join("\n");
 }
-
 
 /* =========================================================
    POST ACCOUNT
@@ -961,28 +987,20 @@ async function postAccount(
     account,
     requestedType
 ) {
+    const platformUser =
+        await getPlatformUser(
+            account.id
+        );
 
     const destination =
         routeAccount(
-            account,
-            requestedType
+            platformUser
         );
 
     const webhook =
         destination === "MAIN"
             ? CONFIG.WEBHOOKS.MAIN
             : CONFIG.WEBHOOKS.UNWANTED;
-
-
-    /*
-     * =====================================================
-     * MAIN / UNWANTED WEBHOOK
-     * =====================================================
-     *
-     * ONLY username:password in the message content.
-     *
-     * The embed remains unchanged.
-     */
 
     const username =
         isUsableValue(account.username)
@@ -997,189 +1015,46 @@ async function postAccount(
     const compactContent =
         `${username}:${password}`;
 
-
     const embed =
         createAccountEmbed(
             account,
+            platformUser,
             requestedType
         );
 
-
     await sendWebhook(
         webhook,
-
         {
             username:
                 CONFIG.BOT_NAME,
-
             content:
                 compactContent,
-
             embeds: [
                 embed
             ]
         }
     );
 
-
-    /*
-     * =====================================================
-     * ALL ACCOUNTS WEBHOOK
-     * =====================================================
-     *
-     * Every successfully generated account gets sent here,
-     * regardless of age or destination.
-     *
-     * This contains all API response fields in searchable
-     * plain text rather than a JSON code block.
-     */
-
     const detailedContent =
         createDetailedAccountMessage(
             account
         );
 
-
-    /*
-     * Discord messages have a content size limit.
-     *
-     * Split the detailed account data into multiple
-     * messages if necessary.
-     */
-
-    const MAX_CONTENT_LENGTH = 1900;
-
-    const lines =
-        detailedContent.split("\n");
-
-    const chunks = [];
-
-    let currentChunk = "";
-
-
-    for (
-        const line of lines
-    ) {
-
-        /*
-         * Normal case: line fits in current chunk.
-         */
-        if (
-            currentChunk.length +
-            line.length +
-            1
-            <= MAX_CONTENT_LENGTH
-        ) {
-
-            currentChunk +=
-                currentChunk
-                    ? `\n${line}`
-                    : line;
-
-            continue;
+    await sendWebhook(
+        CONFIG.WEBHOOKS.ALL_ACCOUNTS,
+        {
+            username:
+                CONFIG.BOT_NAME,
+            content:
+                detailedContent,
+            embeds: [
+                embed
+            ]
         }
-
-
-        /*
-         * Save the current chunk.
-         */
-        if (currentChunk) {
-
-            chunks.push(
-                currentChunk
-            );
-
-            currentChunk = "";
-        }
-
-
-        /*
-         * If an individual field itself is too large
-         * (for example a very long cookie), split it.
-         */
-        if (
-            line.length >
-            MAX_CONTENT_LENGTH
-        ) {
-
-            let remaining =
-                line;
-
-            while (
-                remaining.length >
-                MAX_CONTENT_LENGTH
-            ) {
-
-                chunks.push(
-                    remaining.slice(
-                        0,
-                        MAX_CONTENT_LENGTH
-                    )
-                );
-
-                remaining =
-                    remaining.slice(
-                        MAX_CONTENT_LENGTH
-                    );
-            }
-
-            currentChunk =
-                remaining;
-
-        } else {
-
-            currentChunk =
-                line;
-        }
-    }
-
-
-    if (currentChunk) {
-
-        chunks.push(
-            currentChunk
-        );
-    }
-
-
-    /*
-     * Send every chunk to the archive webhook.
-     *
-     * The embed is attached only to the final message
-     * so the archive channel doesn't get duplicate embeds.
-     */
-
-    for (
-        let i = 0;
-        i < chunks.length;
-        i++
-    ) {
-
-        const isLast =
-            i === chunks.length - 1;
-
-        await sendWebhook(
-            CONFIG.WEBHOOKS.ALL_ACCOUNTS,
-
-            {
-                username:
-                    CONFIG.BOT_NAME,
-
-                content:
-                    chunks[i],
-
-                embeds:
-                    isLast
-                        ? [embed]
-                        : []
-            }
-        );
-    }
-
+    );
 
     return destination;
 }
-
 
 /* =========================================================
    GENERATION COUNTERS
@@ -1858,244 +1733,3 @@ async function stopGenerator(
     ) {
         return;
     }
-
-
-    STATE.stopping = true;
-
-    STATE.running = false;
-
-
-    if (
-        STATE.scheduler
-    ) {
-
-        clearInterval(
-            STATE.scheduler
-        );
-
-        STATE.scheduler = null;
-    }
-
-
-    await operationalLog(
-        "WARNING",
-        reason
-    );
-}
-
-
-/* =========================================================
-   DURATION FORMAT
-========================================================= */
-
-function formatDuration(ms) {
-
-    let seconds =
-        Math.ceil(ms / 1000);
-
-    const days =
-        Math.floor(
-            seconds / 86400
-        );
-
-    seconds %= 86400;
-
-    const hours =
-        Math.floor(
-            seconds / 3600
-        );
-
-    seconds %= 3600;
-
-    const minutes =
-        Math.floor(
-            seconds / 60
-        );
-
-    seconds %= 60;
-
-
-    const parts = [];
-
-    if (days) {
-        parts.push(`${days}d`);
-    }
-
-    if (hours) {
-        parts.push(`${hours}h`);
-    }
-
-    if (minutes) {
-        parts.push(`${minutes}m`);
-    }
-
-    if (seconds) {
-        parts.push(`${seconds}s`);
-    }
-
-
-    return parts.length
-        ? parts.join(" ")
-        : "0s";
-}
-
-
-/* =========================================================
-   STATUS DISPLAY
-========================================================= */
-
-function printStatus() {
-
-    console.log("");
-    console.log(
-        "=============================="
-    );
-    console.log(
-        " BloxGen Generator Status"
-    );
-    console.log(
-        "=============================="
-    );
-
-
-    for (
-        const [type, config]
-        of Object.entries(
-            CONFIG.GENERATORS
-        )
-    ) {
-
-        if (!config.enabled) {
-            continue;
-        }
-
-
-        const count =
-            getCount(type);
-
-
-        const remaining =
-            getRemaining(type);
-
-
-        const last =
-            STATE.lastGeneration[type];
-
-
-        let cooldown =
-            "Ready";
-
-
-        if (last) {
-
-            const remainingMs =
-                Math.max(
-                    0,
-
-                    config.cooldownMs -
-                    (
-                        Date.now() -
-                        last
-                    )
-                );
-
-
-            if (
-                remainingMs > 0
-            ) {
-
-                cooldown =
-                    formatDuration(
-                        remainingMs
-                    );
-            }
-        }
-
-
-        console.log(
-            `${displayType(type)}: ${count}/${config.dailyLimit} | Cooldown: ${cooldown} | Remaining: ${remaining}`
-        );
-    }
-
-
-    console.log(
-        "=============================="
-    );
-
-    console.log("");
-}
-
-
-/* =========================================================
-   PROCESS SIGNALS
-========================================================= */
-
-process.on(
-    "SIGINT",
-
-    async () => {
-
-        await stopGenerator(
-            "Generator stopped manually."
-        );
-
-        process.exit(0);
-    }
-);
-
-
-process.on(
-    "SIGTERM",
-
-    async () => {
-
-        await stopGenerator(
-            "Generator terminated."
-        );
-
-        process.exit(0);
-    }
-);
-
-
-/* =========================================================
-   STARTUP
-========================================================= */
-
-async function main() {
-
-    validateConfig();
-
-    loadState();
-
-    resetDailyCountersIfNeeded();
-
-    printStatus();
-
-    await startGenerator();
-}
-
-
-main()
-    .catch(
-        async error => {
-
-            console.error(
-                "Fatal error:",
-                error
-            );
-
-            await operationalLog(
-                "ERROR",
-
-                "Fatal generator error.",
-
-                {
-                    Error:
-                        error.message
-                }
-            );
-
-            process.exit(1);
-        }
-    );
